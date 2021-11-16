@@ -17,6 +17,7 @@ from imsitu import imSituSituation
 from imsitu import imSituSimpleImageFolder
 from utils import initLinear
 import json
+from tqdm import tqdm
 
 class vgg_modified(nn.Module):
   def __init__(self):
@@ -426,8 +427,9 @@ def predict_human_readable (dataset_loader, simple_dataset,  model, outdir, top_
   model.eval()  
   print("predicting...")
   mx = len(dataset_loader) 
-  for i, (input, index) in enumerate(dataset_loader):
-      print ("{}/{} batches".format(i+1,mx))
+  preds = {}
+  for i, (input, index) in enumerate(tqdm(dataset_loader)):
+      # print ("{}/{} batches".format(i+1,mx))
       input_var = torch.autograd.Variable(input.cuda(), volatile = True)
       (scores,predictions)  = model.forward_max(input_var)
       #(s_sorted, idx) = torch.sort(scores, 1, True)
@@ -441,9 +443,10 @@ def predict_human_readable (dataset_loader, simple_dataset,  model, outdir, top_
           items[-1]["score"] = scores.data[_b][_p].item()
         items = sorted(items, key = lambda x: -x["score"])[:top_k]
         name = simple_dataset.images[index[_b][0]].split(".")[:-1]
-        name.append("predictions")
-        outfile = outdir + ".".join(name)
-        json.dump(items,open(outfile,"w"))
+        preds[name[0]] = items
+        # name.append("predictions")
+        # outfile = outdir + '/' + ".".join(name)
+  json.dump(preds, open(outdir + '/predictions.json', "w"))
 
 
 def compute_features(dataset_loader, simple_dataset,  model, outdir):
@@ -469,8 +472,8 @@ def eval_model(dataset_loader, encoding, model):
     top5 = imSituTensorEvaluation(5, 3, encoding)
  
     mx = len(dataset_loader) 
-    for i, (index, input, target) in enumerate(dataset_loader):
-      print ("{}/{} batches\r".format(i+1,mx)) ,
+    for i, (index, input, target) in enumerate(tqdm(dataset_loader)):
+      # print ("{}/{} batches\r".format(i+1,mx)) ,
       input_var = torch.autograd.Variable(input.cuda(), volatile = True)
       target_var = torch.autograd.Variable(target.cuda(), volatile = True)
       (scores,predictions)  = model.forward_max(input_var)
@@ -596,8 +599,8 @@ if __name__ == "__main__":
     device_array = [i for i in range(0,ngpus)]
     batch_size = args.batch_size*ngpus
 
-    train_loader  = torch.utils.data.DataLoader(dataset_train, batch_size = batch_size, shuffle = True, num_workers = 3) 
-    dev_loader  = torch.utils.data.DataLoader(dataset_dev, batch_size = batch_size, shuffle = True, num_workers = 3) 
+    train_loader  = torch.utils.data.DataLoader(dataset_train, batch_size = batch_size, shuffle = True, num_workers = 4) 
+    dev_loader  = torch.utils.data.DataLoader(dataset_dev, batch_size = batch_size, shuffle = True, num_workers = 4) 
 
     model.cuda()
     optimizer = optim.Adam(model.parameters(), lr = args.learning_rate , weight_decay = args.weight_decay)
@@ -624,9 +627,10 @@ if __name__ == "__main__":
     model.cuda()
     
     dataset = imSituSituation(args.image_dir, eval_file, encoder, model.dev_preprocess())
-    loader  = torch.utils.data.DataLoader(dataset, batch_size = args.batch_size, shuffle = True, num_workers = 3) 
+    loader  = torch.utils.data.DataLoader(dataset, batch_size = args.batch_size, shuffle = True, num_workers = 4) 
 
-    (top1, top5) = eval_model(loader, encoder, model)    
+    with torch.no_grad():
+      (top1, top5) = eval_model(loader, encoder, model)    
     top1_a = top1.get_average_results()
     top5_a = top5.get_average_results()
 
@@ -655,7 +659,7 @@ if __name__ == "__main__":
     model.cuda()
     
     folder_dataset = imSituSimpleImageFolder(args.image_dir, model.dev_preprocess())
-    image_loader  = torch.utils.data.DataLoader(folder_dataset, batch_size = args.batch_size, shuffle = False, num_workers = 3) 
+    image_loader  = torch.utils.data.DataLoader(folder_dataset, batch_size = args.batch_size, shuffle = False, num_workers = 4) 
 
     compute_features(image_loader, folder_dataset, model, args.output_dir)    
 
@@ -678,7 +682,12 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(args.weights_file))
     model.cuda()
 
-    folder_dataset = imSituSimpleImageFolder(args.image_dir, model.dev_preprocess())
-    image_loader  = torch.utils.data.DataLoader(folder_dataset, batch_size = args.batch_size, shuffle = False, num_workers = 3) 
+    eval_file = json.load(open(args.dataset_dir + "/" + args.eval_file))
+    eval_images = set(eval_file.keys())
+    selection_func = lambda x: x.split('/')[-1] in eval_images
+
+    folder_dataset = imSituSimpleImageFolder(args.image_dir, model.dev_preprocess(), selection_func=selection_func)
+    image_loader  = torch.utils.data.DataLoader(folder_dataset, batch_size = args.batch_size, shuffle = False, num_workers = 4) 
     
-    predict_human_readable(image_loader, folder_dataset, model, args.output_dir, args.top_k)
+    with torch.no_grad():
+      predict_human_readable(image_loader, folder_dataset, model, args.output_dir, args.top_k)

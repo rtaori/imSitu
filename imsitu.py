@@ -324,12 +324,13 @@ class imSituSimpleImageFolder(data.Dataset):
           images.append(target)
     return images
 
-   def __init__(self, root, transform=None):
+   def __init__(self, root, transform=None, selection_func=None):
         self.root = root
         self.transform = transform
         #list all images        
         self.ext = [ '.jpg', '.JPG', '.jpeg', '.JPEG', '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP',]
         self.images = self.get_images(root)
+        self.images = [image for image in self.images if selection_func(image)]
  
    def __getitem__(self, index):
         _id = os.path.join(self.root,self.images[index])
