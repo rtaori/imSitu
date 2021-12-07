@@ -80,7 +80,7 @@ def train_model(max_epoch, eval_frequency, train_loader, dev_loader, model, enco
       print("Dev {} average :{:.2f} {} {}".format(total_steps-1, avg_score*100, format_dict(top1_a,"{:.2f}", "1-"), 
             format_dict(top5_a, "{:.2f}", "5-")))
 
-      torch.save(model.state_dict(), f'ep{k}_'+save_path)
+      torch.save(model.state_dict(), save_path+f'_ep{k}')
 
 
 if __name__ == "__main__":
