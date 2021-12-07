@@ -68,8 +68,6 @@ def train_model(max_epoch, eval_frequency, train_loader, dev_loader, model, enco
             loss_total / ((total_steps-1)%eval_frequency) , 
             (time.time() - time_all)/ ((total_steps-1)%eval_frequency))
           )
-        
-        if i == 10: break
               
       top1, top5 = eval_model(dev_loader, encoding, model)
       top1_a = top1.get_average_results()
