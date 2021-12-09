@@ -357,16 +357,12 @@ class imSituSituation(data.Dataset):
         return rv
       
    def __getitem__(self, index):
-        imsitu = self.imsitu
         _id = self.ids[index]
         ann = self.imsitu[_id]
-       
         img = Image.open(os.path.join(self.root, _id)).convert('RGB')
-        
         if self.transform is not None: img = self.transform(img)
         target = self.encoder.to_tensor([ann])
-
-        return (torch.LongTensor([index]), img, target)
+        return (_id, img, target)
 
    def __len__(self):
         return len(self.ids)

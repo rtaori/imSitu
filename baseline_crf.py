@@ -141,15 +141,14 @@ class baseline_crf(nn.Module):
      
      self.normalize = tv.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
      self.train_transform = tv.transforms.Compose([
-            tv.transforms.Scale(224),
-            tv.transforms.RandomCrop(224),
+            tv.transforms.RandomResizedCrop(224),
             tv.transforms.RandomHorizontalFlip(),
             tv.transforms.ToTensor(),
             self.normalize,
         ])
 
      self.dev_transform = tv.transforms.Compose([
-            tv.transforms.Scale(224),
+            tv.transforms.Resize(224),
             tv.transforms.CenterCrop(224),
             tv.transforms.ToTensor(),
             self.normalize,
@@ -164,7 +163,6 @@ class baseline_crf(nn.Module):
      self.split_vr = {}
      self.v_roles = {}
      #cnn
-     print(cnn_type)
      if cnn_type == "resnet_101" : self.cnn = resnet_modified_large()
      elif cnn_type == "resnet_50": self.cnn = resnet_modified_medium()
      elif cnn_type == "resnet_34": self.cnn = resnet_modified_small()
@@ -419,8 +417,8 @@ class baseline_crf(nn.Module):
 def format_dict(d, s, p):
     rv = ""
     for (k,v) in d.items():
-      if len(rv) > 0: rv += " , "
-      rv+=p+str(k) + ":" + s.format(v*100)
+      if len(rv) > 0: rv += ", "
+      rv+=p+str(k) + " = " + s.format(v*100)
     return rv
 
 def predict_human_readable (dataset_loader, simple_dataset,  model, outdir, top_k):
