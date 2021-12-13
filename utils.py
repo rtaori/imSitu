@@ -19,8 +19,11 @@ def collapse_annotations(dataset, use_majority=True):
         frame_collapsed = {k: [] for k in annotations['frames'][0].keys()}
         for frame in annotations['frames']:
             for k, v in frame.items():
-                frame_collapsed[k].append(v)
+                if v.strip():
+                    frame_collapsed[k].append(v)
         for k in frame_collapsed.keys():
+            if len(frame_collapsed[k]) == 0:
+                frame_collapsed[k] = ['']
             maj_v, count = Counter(frame_collapsed[k]).most_common(1)[0]
             if use_majority and count > 1:
                 frame_collapsed[k] = maj_v

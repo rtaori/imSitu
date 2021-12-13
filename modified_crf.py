@@ -1,9 +1,11 @@
+import os
 import time
 from torch import optim
 import torch
 import json
 import argparse
 from tqdm import tqdm
+import subprocess
 
 from imsitu import imSituTensorEvaluation
 from imsitu import imSituSituation
@@ -17,7 +19,7 @@ def eval_model(dataset_loader, encoding, model):
     top1 = imSituTensorEvaluation(1, 3, encoding)
 
     for _, input, target in tqdm(dataset_loader):
-        input_var = torch.autograd.Variable(input.cuda(), volatile=True)
+        input_var = torch.autograd.Variable(input.cuda())
         (scores, predictions) = model.forward_max(input_var)
         (s_sorted, idx) = torch.sort(scores, 1, True)
         top1.add_point(target, predictions.data, idx.data)
@@ -31,7 +33,7 @@ def predict_human_readable(dataset_loader, encoding, model, top_k):
     preds = {}
 
     for ids, input, target in tqdm(dataset_loader):
-        input_var = torch.autograd.Variable(input.cuda(), volatile=True)
+        input_var = torch.autograd.Variable(input.cuda())
         (scores, predictions) = model.forward_max(input_var)
         human = encoding.to_situation(predictions)
         (b, p, d) = predictions.size()
@@ -78,7 +80,8 @@ def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer,
                       f"loss = {loss.item():.2f}, avg_loss = {loss_total/(i+1):.2f}, "
                       f"batch_time = {(time.time()-time_all)/(i+1):.2f}")
 
-        top1 = eval_model(dev_loader, encoding, model)
+        with torch.no_grad():
+            top1 = eval_model(dev_loader, encoding, model)
         top1_a = top1.get_average_results()
         avg_score = top1_a["verb"] + top1_a["value"] + top1_a["value-all"] + top1_a["value*"] + top1_a["value-all*"]
         avg_score /= 5
@@ -88,8 +91,7 @@ def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="imsitu Situation CRF. Training, evaluation, prediction and features.")
+    parser = argparse.ArgumentParser(description="imsitu Situation CRF. Training, evaluation, prediction and features.")
     parser.add_argument("--save_model_path", default="model.pth", help="location to put model")
     parser.add_argument("--save_preds_path", default="predictions.json", help="location to put model predictions")
     parser.add_argument("--image_dir", default="/scr/biggest/of500_images_resized",
@@ -104,7 +106,7 @@ if __name__ == "__main__":
                         help="learning rate for ADAM", type=float)
     parser.add_argument("--weight_decay", default=5e-4,
                         help="learning rate decay for ADAM", type=float)
-    parser.add_argument("--training_epochs", default=20,
+    parser.add_argument("--training_epochs", default=30,
                         help="total number of training epochs", type=int)
     parser.add_argument("--top_k", default=1, type=int,
                         help="topk to use for writing predictions to file")
@@ -113,6 +115,10 @@ if __name__ == "__main__":
     parser.add_argument("--collapse_annotations", choices=["majority", "random"],
                         help="keep full annotations or collapse into one by majority or randomly")
     args = parser.parse_args()
+
+    if not os.path.isdir(args.image_dir):
+        subprocess.run('cp /u/scr/nlp/data/of500_images_resized.tar /scr/biggest'.split(' '))
+        subprocess.run('tar -xf /scr/biggest/of500_images_resized.tar -C /scr/biggest'.split(' '))
 
     torch.multiprocessing.set_sharing_strategy('file_system')
     torch.backends.cudnn.benchmark = True
@@ -142,5 +148,6 @@ if __name__ == "__main__":
     train_model(args.training_epochs, train_loader, dev_loader, model, encoder, optimizer,
                 args.save_model_path, n_refs=1 if args.collapse_annotations else 3)
 
-    preds = predict_human_readable(dev_loader, encoder, model, args.top_k)
+    with torch.no_grad():
+        preds = predict_human_readable(dev_loader, encoder, model, args.top_k)
     json.dump(preds, open(args.save_preds_path, "w"))
