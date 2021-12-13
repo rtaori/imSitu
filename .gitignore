@@ -228,3 +228,7 @@ $RECYCLE.BIN/
 
 # slurm logs
 *.out
+
+# wandb logs
+wandb/
+job-out/

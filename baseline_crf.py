@@ -130,6 +130,37 @@ class resnet_modified_small(nn.Module):
         x = self.dropout2d(x)
 
         return self.dropout(self.relu(self.linear(x.view(-1, 7*7*self.base_size()))))
+
+
+class resnet_modified_extra_small(nn.Module):
+ def __init__(self):
+    super(resnet_modified_extra_small, self).__init__()
+    self.resnet = tv.models.resnet18(pretrained=True)
+    #probably want linear, relu, dropout
+    self.linear = nn.Linear(7*7*512, 1024)
+    self.dropout2d = nn.Dropout2d(.5)
+    self.dropout = nn.Dropout(.5)
+    self.relu = nn.LeakyReLU()
+    initLinear(self.linear)
+
+ def base_size(self): return 512
+ def rep_size(self): return 1024
+
+ def forward(self, x):
+        x = self.resnet.conv1(x)
+        x = self.resnet.bn1(x)
+        x = self.resnet.relu(x)
+        x = self.resnet.maxpool(x)
+
+        x = self.resnet.layer1(x)
+        x = self.resnet.layer2(x)
+        x = self.resnet.layer3(x)
+        x = self.resnet.layer4(x)
+     
+        x = self.dropout2d(x)
+
+        return self.dropout(self.relu(self.linear(x.view(-1, 7*7*self.base_size()))))
+
       
 class baseline_crf(nn.Module):
    def train_preprocess(self): return self.train_transform
@@ -166,6 +197,7 @@ class baseline_crf(nn.Module):
      if cnn_type == "resnet_101" : self.cnn = resnet_modified_large()
      elif cnn_type == "resnet_50": self.cnn = resnet_modified_medium()
      elif cnn_type == "resnet_34": self.cnn = resnet_modified_small()
+     elif cnn_type == "resnet_18": self.cnn = resnet_modified_extra_small()
      else: 
        print("unknown base network")
        exit()
@@ -564,7 +596,7 @@ if __name__ == "__main__":
   parser.add_argument("--dataset_dir", default="./", help="location of train.json, dev.json, ect.") 
   parser.add_argument("--weights_file", help="the model to start from")
   parser.add_argument("--encoding_file", help="a file corresponding to the encoder")
-  parser.add_argument("--cnn_type", choices=["resnet_34", "resnet_50", "resnet_101"], default="resnet_101", help="the cnn to initilize the crf with") 
+  parser.add_argument("--cnn_type", choices=["resnet_34", "resnet_50", "resnet_101", "resnet18"], default="resnet_101", help="the cnn to initilize the crf with") 
   parser.add_argument("--batch_size", default=64, help="batch size for training", type=int)
   parser.add_argument("--learning_rate", default=1e-5, help="learning rate for ADAM", type=float)
   parser.add_argument("--weight_decay", default=5e-4, help="learning rate decay for ADAM", type=float)  

@@ -1,11 +1,13 @@
 import os
 import time
-from torch import optim
-import torch
 import json
 import argparse
-from tqdm import tqdm
+import random
 import subprocess
+from tqdm import tqdm
+import wandb
+import torch
+from torch import optim
 
 from imsitu import imSituTensorEvaluation
 from imsitu import imSituSituation
@@ -51,7 +53,7 @@ def predict_human_readable(dataset_loader, encoding, model, top_k):
     return preds
 
 
-def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer, save_path, n_refs=3):
+def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer, save_dir, n_refs=3):
     time_all = time.time()
     print_freq = 100
 
@@ -73,6 +75,7 @@ def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer,
             loss_total += loss.item()
 
             top1.add_point(target, predictions.data, idx.data)
+            wandb.log({"loss": loss.item()})
 
             if i % print_freq == 0:
                 top1_a = top1.get_average_results()
@@ -87,26 +90,29 @@ def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer,
         avg_score /= 5
         print(f"Epoch {k} Dev: average = {avg_score*100:.2f}, {format_dict(top1_a, '{:.2f}', '1-')}")
 
-        torch.save(model.state_dict(), save_path)
+        wandb.log({"avg_score": avg_score, 'epoch': k} | top1_a)
+        torch.save(model.state_dict(), f'{save_dir}/models/{wandb.run.name}.pth')
+        # scheduler.step()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="imsitu Situation CRF. Training, evaluation, prediction and features.")
-    parser.add_argument("--save_model_path", default="model.pth", help="location to put model")
-    parser.add_argument("--save_preds_path", default="predictions.json", help="location to put model predictions")
+    parser.add_argument('--wandb-group')
+    parser.add_argument("--save_dir", default="/juice/scr/rtaori/imsitu_feedback")
     parser.add_argument("--image_dir", default="/scr/biggest/of500_images_resized",
                         help="location of images to process")
     parser.add_argument("--encoding_file", default="/juice/scr/rtaori/imsitu_data/baseline_models/baseline_encoder",
                         help="a file corresponding to the encoder")
-    parser.add_argument("--cnn_type", choices=["resnet_34", "resnet_50", "resnet_101"],
+    parser.add_argument("--cnn_type", choices=["resnet_18", "resnet_34", "resnet_50", "resnet_101"],
                         default="resnet_34", help="the cnn to initilize the crf with")
     parser.add_argument("--batch_size", default=64,
                         help="batch size for training", type=int)
     parser.add_argument("--learning_rate", default=1e-5,
                         help="learning rate for ADAM", type=float)
+    # parser.add_argument("--lr_step_size", default=40, type=int)
     parser.add_argument("--weight_decay", default=5e-4,
                         help="learning rate decay for ADAM", type=float)
-    parser.add_argument("--training_epochs", default=30,
+    parser.add_argument("--training_epochs", default=40,
                         help="total number of training epochs", type=int)
     parser.add_argument("--top_k", default=1, type=int,
                         help="topk to use for writing predictions to file")
@@ -114,9 +120,16 @@ if __name__ == "__main__":
                         help="number of dataloading workers")
     parser.add_argument("--collapse_annotations", choices=["majority", "random"],
                         help="keep full annotations or collapse into one by majority or randomly")
+    parser.add_argument("--training_set_size", default=75000, type=int)
+    parser.add_argument("--test_set_size", default=31102, type=int)
     args = parser.parse_args()
 
+    mode = 'disabled' if not args.wandb_group else 'online'
+    wandb.init(project='feedback-imsitu', entity='hashimoto-group', group=args.wandb_group, mode=mode)
+    wandb.config.update(vars(args))
+
     if not os.path.isdir(args.image_dir):
+        print('Downloading and extracting dataset....')
         subprocess.run('cp /u/scr/nlp/data/of500_images_resized.tar /scr/biggest'.split(' '))
         subprocess.run('tar -xf /scr/biggest/of500_images_resized.tar -C /scr/biggest'.split(' '))
 
@@ -132,6 +145,11 @@ if __name__ == "__main__":
     test_set = json.load(open("test.json"))
     dataset = train_set | dev_set | test_set
 
+    images = list(dataset.keys())
+    random.shuffle(images)
+    train_set = {image: dataset[image] for image in images[:args.training_set_size]}
+    test_set = {image: dataset[image] for image in images[-args.test_set_size:]}
+
     if args.collapse_annotations == "majority":
         train_set = collapse_annotations(train_set, use_majority=True)
     elif args.collapse_annotations == "random":
@@ -145,9 +163,10 @@ if __name__ == "__main__":
                                              shuffle=False, num_workers=args.num_workers)
 
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=0.1)
     train_model(args.training_epochs, train_loader, dev_loader, model, encoder, optimizer,
-                args.save_model_path, n_refs=1 if args.collapse_annotations else 3)
+                args.save_dir, n_refs=1 if args.collapse_annotations else 3)
 
     with torch.no_grad():
         preds = predict_human_readable(dev_loader, encoder, model, args.top_k)
-    json.dump(preds, open(args.save_preds_path, "w"))
+    json.dump(preds, open(f'{args.save_dir}/preds/{wandb.run.name}.json', "w"))
