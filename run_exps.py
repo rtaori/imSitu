@@ -3,7 +3,7 @@ import random
 
 wandb_group = "hparam-tuning"
 
-excluded_machines = 'jagupard10,jagupard11,jagupard12,jagupard13,jagupard14,jagupard15'
+excluded_machines = 'jagupard10,jagupard11,jagupard12,jagupard13,jagupard14,jagupard15,jagupard18'
 launch_command = f"nlprun -x {excluded_machines} -p low -a rohan-base -c 5 -o job-out/"
 base_command =  f"cd ~/imSitu && python modified_crf.py --wandb-group {wandb_group}"
 
@@ -20,4 +20,4 @@ print(f'Launching {len(completions)} runs:')
 for i, completion in enumerate(completions):
     command = f"{launch_command}{random.randint(0, 10**10)} '{base_command} {static_options} {completion}'"
     print(command)
-    subprocess.run(command, shell=True)
+    # subprocess.run(command, shell=True)

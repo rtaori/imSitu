@@ -101,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", default="/juice/scr/rtaori/imsitu_feedback")
     parser.add_argument("--image_dir", default="/scr/biggest/of500_images_resized",
                         help="location of images to process")
-    parser.add_argument("--encoding_file", default="/juice/scr/rtaori/imsitu_data/baseline_models/baseline_encoder",
+    parser.add_argument("--encoding_file", default="baseline_encoder",
                         help="a file corresponding to the encoder")
     parser.add_argument("--cnn_type", choices=["resnet_18", "resnet_34", "resnet_50", "resnet_101"],
                         default="resnet_34", help="the cnn to initilize the crf with")
