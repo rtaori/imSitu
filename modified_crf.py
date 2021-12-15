@@ -8,6 +8,7 @@ from tqdm import tqdm
 import wandb
 import torch
 from torch import optim
+import numpy as np
 
 from imsitu import imSituTensorEvaluation
 from imsitu import imSituSituation
@@ -92,7 +93,6 @@ def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer,
 
         wandb.log({"avg_score": avg_score, 'epoch': k} | top1_a)
         torch.save(model.state_dict(), f'{save_dir}/models/{wandb.run.name}.pth')
-        # scheduler.step()
 
 
 if __name__ == "__main__":
@@ -109,7 +109,6 @@ if __name__ == "__main__":
                         help="batch size for training", type=int)
     parser.add_argument("--learning_rate", default=1e-5,
                         help="learning rate for ADAM", type=float)
-    # parser.add_argument("--lr_step_size", default=40, type=int)
     parser.add_argument("--weight_decay", default=5e-4,
                         help="learning rate decay for ADAM", type=float)
     parser.add_argument("--training_epochs", default=40,
@@ -121,7 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--collapse_annotations", choices=["majority", "random"],
                         help="keep full annotations or collapse into one by majority or randomly")
     parser.add_argument("--training_set_size", default=75000, type=int)
-    parser.add_argument("--test_set_size", default=31102, type=int)
+    parser.add_argument("--test_set_imgs_per_class", default=50, type=int)
     args = parser.parse_args()
 
     mode = 'disabled' if not args.wandb_group else 'online'
@@ -145,10 +144,16 @@ if __name__ == "__main__":
     test_set = json.load(open("test.json"))
     dataset = train_set | dev_set | test_set
 
+    verbs = np.unique([x.split('_')[0] for x in dataset.keys()])
     images = list(dataset.keys())
     random.shuffle(images)
-    train_set = {image: dataset[image] for image in images[:args.training_set_size]}
-    test_set = {image: dataset[image] for image in images[-args.test_set_size:]}
+    train_images, test_images = [], []
+    for verb in verbs:
+        matching_images = [name for name in images if verb == name.split('_')[0]]
+        train_images += matching_images[:-args.test_set_imgs_per_class]
+        test_images += matching_images[-args.test_set_imgs_per_class:]
+    train_set = {image: dataset[image] for image in random.sample(train_images, args.training_set_size)}
+    test_set = {image: dataset[image] for image in test_images}
 
     if args.collapse_annotations == "majority":
         train_set = collapse_annotations(train_set, use_majority=True)
@@ -163,7 +168,6 @@ if __name__ == "__main__":
                                              shuffle=False, num_workers=args.num_workers)
 
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=0.1)
     train_model(args.training_epochs, train_loader, dev_loader, model, encoder, optimizer,
                 args.save_dir, n_refs=1 if args.collapse_annotations else 3)
 
