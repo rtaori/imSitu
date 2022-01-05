@@ -54,7 +54,7 @@ def predict_human_readable(dataset_loader, encoding, model, top_k):
     return preds
 
 
-def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer, save_dir, n_refs=3):
+def train_model(max_epoch, train_loader, test_loader, model, encoding, optimizer, save_dir, n_refs=3):
     time_all = time.time()
     print_freq = 100
 
@@ -85,7 +85,7 @@ def train_model(max_epoch, train_loader, dev_loader, model, encoding, optimizer,
                       f"batch_time = {(time.time()-time_all)/(i+1):.2f}")
 
         with torch.no_grad():
-            top1 = eval_model(dev_loader, encoding, model)
+            top1 = eval_model(test_loader, encoding, model)
         top1_a = top1.get_average_results()
         avg_score = top1_a["verb"] + top1_a["value"] + top1_a["value-all"] + top1_a["value*"] + top1_a["value-all*"]
         avg_score /= 5
@@ -120,7 +120,12 @@ if __name__ == "__main__":
     parser.add_argument("--collapse_annotations", choices=["majority", "random"],
                         help="keep full annotations or collapse into one by majority or randomly")
     parser.add_argument("--training_set_size", default=75000, type=int)
+    parser.add_argument("--class_balance_test_set", action="store_true")
     parser.add_argument("--test_set_imgs_per_class", default=50, type=int)
+    parser.add_argument("--test_set_size", default=25000, type=int)
+    parser.add_argument("--merge_only_train_set", action="store_true")
+    parser.add_argument("--merge_only_train_and_dev_set", action="store_true")
+    parser.add_argument("--fix_dev_set_as_test_set", action="store_true")
     args = parser.parse_args()
 
     mode = 'disabled' if not args.wandb_group else 'online'
@@ -142,35 +147,50 @@ if __name__ == "__main__":
     train_set = json.load(open("train.json"))
     dev_set = json.load(open("dev.json"))
     test_set = json.load(open("test.json"))
-    dataset = train_set | dev_set | test_set
+    if args.merge_only_train_set:
+        dataset = train_set
+    elif args.merge_only_train_and_dev_set:
+        dataset = train_set | dev_set
+    else:
+        dataset = train_set | dev_set | test_set
 
     verbs = np.unique([x.split('_')[0] for x in dataset.keys()])
     images = list(dataset.keys())
     random.shuffle(images)
-    train_images, test_images = [], []
-    for verb in verbs:
-        matching_images = [name for name in images if verb == name.split('_')[0]]
-        train_images += matching_images[:-args.test_set_imgs_per_class]
-        test_images += matching_images[-args.test_set_imgs_per_class:]
-    train_set = {image: dataset[image] for image in random.sample(train_images, args.training_set_size)}
-    test_set = {image: dataset[image] for image in test_images}
+    if args.class_balance_test_set:
+        train_images, test_images = [], []
+        for verb in verbs:
+            matching_images = [name for name in images if verb == name.split('_')[0]]
+            assert args.test_set_imgs_per_class <= len(matching_images)
+            train_images += matching_images[:-args.test_set_imgs_per_class]
+            test_images += matching_images[-args.test_set_imgs_per_class:]
+        train_set = {image: dataset[image] for image in random.sample(train_images, args.training_set_size)}
+        test_set = {image: dataset[image] for image in test_images}
+    else:
+        train_set = {image: dataset[image] for image in images[:args.training_set_size]}
+        if args.fix_dev_set_as_test_set:
+            test_set = dev_set
+        else:
+            test_set = {image: dataset[image] for image in images[-args.test_set_size:]}
 
     if args.collapse_annotations == "majority":
         train_set = collapse_annotations(train_set, use_majority=True)
     elif args.collapse_annotations == "random":
         train_set = collapse_annotations(train_set, use_majority=False)
     dataset_train = imSituSituation(args.image_dir, train_set, encoder, model.train_preprocess())
-    dataset_dev = imSituSituation(args.image_dir, dev_set, encoder, model.dev_preprocess())
+    dataset_test = imSituSituation(args.image_dir, test_set, encoder, model.dev_preprocess())
+
+    print(f"Train set size: {len(dataset_train)}, Test set size: {len(dataset_test)}")
 
     train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size,
                                                shuffle=True, num_workers=args.num_workers)
-    dev_loader = torch.utils.data.DataLoader(dataset_dev, batch_size=args.batch_size,
-                                             shuffle=False, num_workers=args.num_workers)
+    test_loader = torch.utils.data.DataLoader(dataset_test, batch_size=args.batch_size,
+                                              shuffle=False, num_workers=args.num_workers)
 
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    train_model(args.training_epochs, train_loader, dev_loader, model, encoder, optimizer,
+    train_model(args.training_epochs, train_loader, test_loader, model, encoder, optimizer,
                 args.save_dir, n_refs=1 if args.collapse_annotations else 3)
 
     with torch.no_grad():
-        preds = predict_human_readable(dev_loader, encoder, model, args.top_k)
+        preds = predict_human_readable(test_loader, encoder, model, args.top_k)
     json.dump(preds, open(f'{args.save_dir}/preds/{wandb.run.name}.json', "w"))
