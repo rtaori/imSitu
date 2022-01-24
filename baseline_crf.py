@@ -271,7 +271,7 @@ class baseline_crf(nn.Module):
      self.linear_vrn = nn.ModuleList([ nn.Linear(self.rep_size, splits[i]*len(self.split_vr[i])) for i in range(0,len(splits))])
      self.total_vrn = 0
      for i in range(0, len(splits)): self.total_vrn += splits[i]*len(self.split_vr[i])
-     print("total encoding vrn : {0}, with padding in {1} groups : {2}".format(encoding.n_verbrolenoun(), self.total_vrn, len(splits))) 
+    #  print("total encoding vrn : {0}, with padding in {1} groups : {2}".format(encoding.n_verbrolenoun(), self.total_vrn, len(splits))) 
 
      #initilize everything
      initLinear(self.linear_v)

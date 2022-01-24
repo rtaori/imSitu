@@ -13,7 +13,7 @@ import numpy as np
 from imsitu import imSituTensorEvaluation
 from imsitu import imSituSituation
 from baseline_crf import baseline_crf, format_dict
-from utils import collapse_annotations
+from data import collapse_annotations
 
 
 def eval_model(dataset_loader, encoding, model):
