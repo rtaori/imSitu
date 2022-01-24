@@ -104,7 +104,7 @@ if __name__ == "__main__":
     parser.add_argument("--encoding_file", default="baseline_encoder",
                         help="a file corresponding to the encoder")
     parser.add_argument("--cnn_type", choices=["resnet_18", "resnet_34", "resnet_50", "resnet_101"],
-                        default="resnet_34", help="the cnn to initilize the crf with")
+                        default="resnet_18", help="the cnn to initilize the crf with")
     parser.add_argument("--batch_size", default=64,
                         help="batch size for training", type=int)
     parser.add_argument("--learning_rate", default=1e-5,
@@ -120,12 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--collapse_annotations", choices=["majority", "random"],
                         help="keep full annotations or collapse into one by majority or randomly")
     parser.add_argument("--training_set_size", default=75000, type=int)
-    parser.add_argument("--class_balance_test_set", action="store_true")
     parser.add_argument("--test_set_imgs_per_class", default=50, type=int)
-    parser.add_argument("--test_set_size", default=25000, type=int)
-    parser.add_argument("--merge_only_train_set", action="store_true")
-    parser.add_argument("--merge_only_train_and_dev_set", action="store_true")
-    parser.add_argument("--fix_dev_set_as_test_set", action="store_true")
     args = parser.parse_args()
 
     mode = 'disabled' if not args.wandb_group else 'online'
@@ -147,36 +142,21 @@ if __name__ == "__main__":
     train_set = json.load(open("train.json"))
     dev_set = json.load(open("dev.json"))
     test_set = json.load(open("test.json"))
-    if args.merge_only_train_set:
-        dataset = train_set
-    elif args.merge_only_train_and_dev_set:
-        dataset = train_set | dev_set
-    else:
-        dataset = train_set | dev_set | test_set
+    dataset = train_set | dev_set | test_set
 
     verbs = np.unique([x.split('_')[0] for x in dataset.keys()])
     images = list(dataset.keys())
     random.shuffle(images)
-    if args.class_balance_test_set:
-        train_images, test_images = [], []
-        for verb in verbs:
-            matching_images = [name for name in images if verb == name.split('_')[0]]
-            assert args.test_set_imgs_per_class <= len(matching_images)
-            train_images += matching_images[:-args.test_set_imgs_per_class]
-            test_images += matching_images[-args.test_set_imgs_per_class:]
-        train_set = {image: dataset[image] for image in random.sample(train_images, args.training_set_size)}
-        test_set = {image: dataset[image] for image in test_images}
-    else:
-        train_set = {image: dataset[image] for image in images[:args.training_set_size]}
-        if args.fix_dev_set_as_test_set:
-            test_set = dev_set
-        else:
-            test_set = {image: dataset[image] for image in images[-args.test_set_size:]}
+    train_images, test_images = [], []
+    for verb in verbs:
+        matching_images = [name for name in images if verb == name.split('_')[0]]
+        train_images += matching_images[:-args.test_set_imgs_per_class]
+        test_images += matching_images[-args.test_set_imgs_per_class:]
+    train_set = {image: dataset[image] for image in random.sample(train_images, args.training_set_size)}
+    test_set = {image: dataset[image] for image in test_images}
 
-    if args.collapse_annotations == "majority":
-        train_set = collapse_annotations(train_set, use_majority=True)
-    elif args.collapse_annotations == "random":
-        train_set = collapse_annotations(train_set, use_majority=False)
+    if args.collapse_annotations in ["majority", "random"]:
+        train_set = collapse_annotations(train_set, use_majority=args.collapse_annotations == "majority")
     dataset_train = imSituSituation(args.image_dir, train_set, encoder, model.train_preprocess())
     dataset_test = imSituSituation(args.image_dir, test_set, encoder, model.dev_preprocess())
 
