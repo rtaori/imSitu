@@ -39,7 +39,7 @@ def predict_human_readable(dataset_loader, encoding, model, top_k):
     return top1, preds
 
 
-def train_model(max_epoch, train_loader, test_loader, model, encoding, optimizer, n_refs=3):
+def train_model(max_epoch, train_loader, model, encoding, optimizer, n_refs=3):
     time_all = time.time()
     print_freq = 100
 
@@ -63,7 +63,7 @@ def train_model(max_epoch, train_loader, test_loader, model, encoding, optimizer
             top1.add_point(target, predictions.data, idx.data)
             # wandb.log({"loss": loss.item()})
 
-            if i % print_freq == 0:
+            if i % print_freq == 0 and i > 0:
                 top1_a = top1.get_average_results()
                 print(f"Epoch {k} [{i}/{len(train_loader)}], {format_dict(top1_a, '{:.2f}', '1-')}, "
                       f"loss = {loss.item():.2f}, avg_loss = {loss_total/(i+1):.2f}, "
@@ -71,7 +71,16 @@ def train_model(max_epoch, train_loader, test_loader, model, encoding, optimizer
 
 
 def calculate_training_epochs(dataset_len):
-    return 1#40
+    if dataset_len <= 20000:
+        return 50
+    elif 20000 < dataset_len <= 35000:
+        return int(50 - 10 * (dataset_len - 20000) / 15000)
+    elif 35000 < dataset_len <= 50000:
+        return int(40 - 5 * (dataset_len - 35000) / 15000)
+    elif 50000 < dataset_len <= 75000:
+        return int(35 - 5 * (dataset_len - 50000) / 25000)
+    elif 75000 < dataset_len:
+        return 30
 
 
 if __name__ == "__main__":
@@ -85,13 +94,17 @@ if __name__ == "__main__":
     parser.add_argument("--learning-rate", default=1e-5, type=float)
     parser.add_argument("--weight-decay", default=5e-4, type=float)
     parser.add_argument("--num-workers", default=4, type=int)
-    parser.add_argument("--collapse-annotations", choices=["majority", "random"], 
+    parser.add_argument("--collapse-annotations", choices=["majority", "random"], default='majority',
                         help="keep full annotations or collapse into one by majority or randomly")
     parser.add_argument("--init-train-set-size", default=20000, type=int)
     parser.add_argument('--num-rounds', type=int, default=25)
     parser.add_argument("--test-set-imgs-per-class", default=50, type=int)
     parser.add_argument('--new-label-samples', type=int, default=5000)
     parser.add_argument('--new-unlabel-samples', type=int, default=5000)
+    parser.add_argument('--filter-out-low-scores', action='store_true')
+    parser.add_argument('--filter-score-threshold', type=float, default=1)
+    parser.add_argument('--model-prediction-type', choices=["max_max", "max_marginal"], default="max_max")
+
     args = parser.parse_args()
 
     mode = 'disabled' if not args.wandb_group else 'online'
@@ -116,11 +129,13 @@ if __name__ == "__main__":
     encoder = torch.load(args.encoding_file)
 
     for round in range(args.num_rounds):
-        model = baseline_crf(encoder, cnn_type=args.cnn_type, ngpus=1)
+        # initialize model and optimizer
+        model = baseline_crf(encoder, cnn_type=args.cnn_type, ngpus=1, prediction_type=args.model_prediction_type)
         model = model.cuda()
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
         num_epochs = calculate_training_epochs(len(train_set))
 
+        # create dataloaders
         dataset_train = imSituSituation(args.image_dir, train_set, encoder, model.train_preprocess())
         dataset_test = imSituSituation(args.image_dir, test_set, encoder, model.dev_preprocess())
         train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, 
@@ -133,30 +148,33 @@ if __name__ == "__main__":
                  'size_train_set': len(train_set), 'size_reserve_set': len(reserve_set), 'size_test_set': len(test_set)}
         print(stats)
 
-        train_model(num_epochs, train_loader, test_loader, model, encoder, optimizer,
-                    n_refs=1 if args.collapse_annotations else 3)
+        train_model(num_epochs, train_loader, model, encoder, optimizer, n_refs=1 if args.collapse_annotations else 3)
 
+        # evaluate model on test set and get results
         with torch.no_grad():
             top1, preds = predict_human_readable(test_loader, encoder, model, top_k=1)
         top1_a = top1.get_average_results()
         top1_a['avg-score'] = np.mean([v for v in top1_a.values()])
-        stats = stats | {'eval/'+k:v for k, v in top1_a.items()}
 
-        preds_stats = data.get_prediction_gender_stats(preds)
+        # log results, including a histogram of predicted scores
+        stats = stats | {'eval/'+k:v for k, v in top1_a.items()}        
+        scores_table = wandb.Table(data=[[v[0]['score']] for v in preds.values()], columns=['scores'])
+        scores_histogram = wandb.plot.histogram(scores_table, 'scores', title='test set scores histogram')
+        stats = stats | {'scores_histogram': scores_histogram}
+
+        # log gender bias metadata about the datasets and predictions
+        preds_trans = data.transform_preds_to_dataset(preds)
+        preds_stats = data.get_dataset_gender_stats(preds_trans)
         train_stats = data.get_dataset_gender_stats(train_set)
         test_stats = data.get_dataset_gender_stats(test_set)
         stats = stats | {'preds/'+k:v for k, v in preds_stats.items()}
         stats = stats | {'train/'+k:v for k, v in train_stats.items()}
         stats = stats | {'test/'+k:v for k, v in test_stats.items()}
 
-        wandb.log(stats)
-        torch.save({'round': round, 'model_state_dict': model.state_dict(),
-                    'train_set': train_set, 'reserve_set': reserve_set, 'test_set': test_set}, 
-                   f'{args.save_dir}/models/{wandb.run.name}.pth')
-
         if len(reserve_set) < args.new_label_samples + args.new_unlabel_samples:
             print(f'Ending retraining - not enough remaining samples in reserve set ({len(reserve_set)} left).')
-            break
+            wandb.log(stats)
+            torch.save(model.state_dict(), f'{args.save_dir}/models/{wandb.run.name}_final.pth')
 
         if args.new_label_samples > 0:
             reserve_set_selected, reserve_set = data.rand_split_dataset(reserve_set, args.new_label_samples)
@@ -164,17 +182,24 @@ if __name__ == "__main__":
 
         if args.new_unlabel_samples > 0:
             reserve_set_partition, reserve_set = data.rand_split_dataset(reserve_set, args.new_unlabel_samples)
+            dataset_reserve = imSituSituation(args.image_dir, reserve_set_partition, encoder, model.dev_preprocess())
+            reserve_loader = torch.utils.data.DataLoader(dataset_reserve, batch_size=args.batch_size,
+                                                         shuffle=False, num_workers=args.num_workers)
 
-            # reserve_batches = Batches(reserve_set_partition, test_transform, args.batch_size, 
-            #                           num_workers=args.num_workers, shuffle=False, drop_last=False)
-            # root_idxs, selected_idxs, targs, preds, confs, is_cifars = eval_with_filters_and_return_stats(model, reserve_batches, args)
-            # reserve_stats = calc_reserve_stats(selected_idxs, targs, preds, confs, is_cifars)
-            # stats = stats | reserve_stats
-                    
-            # selected_idxs = selected_idxs.cpu()
-            # reserve_set_selected, _ = split_dataset(reserve_set_partition, selected_idxs)
-            # assert torch.equal(reserve_set_selected[:][3].sort().values, root_idxs[selected_idxs].sort().values.cpu())
-            # tensor_dataset.tensors[1][root_idxs[selected_idxs]] = preds[selected_idxs].cpu() # pseudo labeling
-            # train_set = concat_dataset(train_set, reserve_set_selected)
+            # predict on unlabeled set, optionally filter by score
+            with torch.no_grad():
+                _, reserve_preds = predict_human_readable(reserve_loader, encoder, model, top_k=1)
+            if args.filter_out_low_scores:
+                reserve_preds = {k:v for k, v in reserve_preds.items() if v[0]['score'] >= args.filter_score_threshold}
+                stats = stats | {'filter/frac_examples_accepted': len(reserve_preds) / args.new_unlabel_samples}
 
+            # pseudo-labeling and add to train set for next round
+            reserve_preds_trans = data.transform_preds_to_dataset(reserve_preds)
+            assert all(k in reserve_set_partition for k in reserve_preds_trans.keys())
+            train_set = train_set | reserve_preds_trans
 
+        # save logs and model and dataset checkpoint
+        wandb.log(stats)
+        torch.save({'round': round+1, 'model_state_dict': model.state_dict(),
+                    'train_set': train_set, 'reserve_set': reserve_set, 'test_set': test_set}, 
+                   f'{args.save_dir}/models/{wandb.run.name}.pth')

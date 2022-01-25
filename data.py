@@ -64,6 +64,14 @@ def collapse_annotations(dataset, use_majority=True):
     return dataset_collapsed
 
 
+def transform_preds_to_dataset(preds):
+    dataset = {}
+    for img_name, info in preds.items():
+        info2 = {'verb': info[0]['verb'], 'frames': info[0]['frames']}
+        dataset[img_name + '.jpg'] = info2
+    return dataset
+
+
 def get_dataset_gender_stats(dataset):
     data_interval_ratios = [{'man': 0, 'woman': 0} for _ in range(len(interval_words))]
     cooking_man, cooking_woman = 0, 0
@@ -82,34 +90,9 @@ def get_dataset_gender_stats(dataset):
             if is_woman and not is_man: cooking_woman += 1
 
     total_man, total_woman = sum([x['man'] for x in data_interval_ratios]), sum([x['woman'] for x in data_interval_ratios])
-    dataset_ratio = total_woman / (total_woman + total_man)
-    dataset_interval_ratios = [ratio['woman']/(ratio['man']+ratio['woman']) for ratio in data_interval_ratios]
+    dataset_ratio = total_woman / (total_woman + total_man + np.finfo(float).eps)
+    dataset_interval_ratios = [ratio['woman']/(ratio['man']+ratio['woman']+np.finfo(float).eps) for ratio in data_interval_ratios]
     cooking_ratio = cooking_woman / (cooking_man + cooking_woman + np.finfo(float).eps)
     
     return {'overall_ratio': dataset_ratio, 'cooking_ratio': cooking_ratio} | \
            {f'interval_{i}_ratio': ratio for i, ratio in enumerate(dataset_interval_ratios)}
-
-
-def get_prediction_gender_stats(preds):
-    preds_interval_ratios = [{'man': 0, 'woman': 0} for _ in range(len(interval_words))]
-    cooking_man, cooking_woman = 0, 0
-
-    for _, info in preds.items():
-        if 'agent' not in info[0]['frames'][0]: continue
-        agent = info[0]['frames'][0]['agent']
-        is_man, is_woman = agent in male_nouns, agent in female_nouns
-        for j, words in enumerate(interval_words):
-            if info[0]['verb'] in words:
-                if is_man and not is_woman: preds_interval_ratios[j]['man'] += 1
-                if is_woman and not is_man: preds_interval_ratios[j]['woman'] += 1
-        if info[0]['verb'] == 'cooking':
-            if is_man and not is_woman: cooking_man += 1
-            if is_woman and not is_man: cooking_woman += 1
-
-    total_man, total_woman = sum([x['man'] for x in preds_interval_ratios]), sum([x['woman'] for x in preds_interval_ratios])
-    preds_ratio = total_woman / (total_woman + total_man)
-    preds_interval_ratios = [ratio['woman']/(ratio['man']+ratio['woman']) for ratio in preds_interval_ratios]
-    cooking_ratio = cooking_woman / (cooking_man + cooking_woman + np.finfo(float).eps)
-
-    return {'overall_ratio': preds_ratio, 'cooking_ratio': cooking_ratio} | \
-           {f'interval_{i}_ratio': ratio for i, ratio in enumerate(preds_interval_ratios)}
