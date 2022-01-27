@@ -1,21 +1,20 @@
 import subprocess
 import random
 
-wandb_group = "hparam-tuning-v3"
+wandb_group = "feedback-v1"
 
-excluded_machines = 'jagupard10,jagupard11,jagupard12,jagupard13,jagupard14,jagupard15,jagupard18'
-# excluded_machines = 'jagupard14,jagupard18'
-launch_command = f"nlprun -x {excluded_machines} -p low -a rohan-base -c 5 -o job-out/"
-base_command =  f"cd ~/imSitu && python modified_crf.py --wandb-group {wandb_group}"
+excluded_machines = 'jagupard10,jagupard11,jagupard12,jagupard13,jagupard14,jagupard15'
+excluded_machines = 'jagupard28'
+launch_command = f"nlprun -x {excluded_machines} -a rohan-base -c 8 -r 25G -d 3090 -p high -o job-out/"
+base_command =  f"cd ~/imSitu && python feedback_crf.py --wandb-group {wandb_group}"
 
-static_options = "--training_epochs 200"
-train_set_sizes = [20000, 35000, 50000, 75000, 100000]
+static_options = ""
 
-completions = []
-for _ in range(1):
-    for size in train_set_sizes:
-        str = f'--training_set_size {size}'
-        completions += [str, str + ' --collapse_annotations majority']
+completions = [
+    "--init-train-set-size 20000 --new-label-samples 2500 --new-unlabel-samples 2500",
+    "--init-train-set-size 20000 --new-label-samples 1000 --new-unlabel-samples 4000",
+    "--init-train-set-size 50000 --new-label-samples 2500 --new-unlabel-samples 2500",
+]
 
 
 print(f'Launching {len(completions)} runs:')

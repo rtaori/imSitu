@@ -167,7 +167,7 @@ class baseline_crf(nn.Module):
    def dev_preprocess(self): return self.dev_transform
 
    #these seem like decent splits of imsitu, freq = 0,50,100,282 , prediction type can be "max_max" or "max_marginal"
-   def __init__(self, encoding, splits = [50,100,283], prediction_type = "max_max", ngpus = 1, cnn_type = "resnet_101"):
+   def __init__(self, encoding, splits = [45,70,100,160,339], prediction_type = "max_max", ngpus = 1, cnn_type = "resnet_101"):
      super(baseline_crf, self).__init__() 
      
      self.normalize = tv.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])

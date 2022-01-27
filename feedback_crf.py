@@ -7,8 +7,7 @@ import wandb
 import torch
 from torch import optim
 
-from imsitu import imSituTensorEvaluation
-from imsitu import imSituSituation
+from imsitu import imSituTensorEvaluation, imSituVerbRoleLocalNounEncoder, imSituSituation
 from baseline_crf import baseline_crf, format_dict
 import data
 
@@ -88,7 +87,6 @@ if __name__ == "__main__":
     parser.add_argument('--wandb-group')
     parser.add_argument("--save-dir", default="/juice/scr/rtaori/imsitu_feedback")
     parser.add_argument("--image-dir", default="/scr/biggest/of500_images_resized")
-    parser.add_argument("--encoding-file", default="baseline_encoder")
     parser.add_argument("--cnn-type", choices=["resnet_18", "resnet_34", "resnet_50", "resnet_101"], default="resnet_18")
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--learning-rate", default=1e-5, type=float)
@@ -121,12 +119,12 @@ if __name__ == "__main__":
     test_set = json.load(open("test.json"))
     dataset = train_set | dev_set | test_set
 
+    encoder = imSituVerbRoleLocalNounEncoder(dataset)
+
     test_set, reserve_set = data.rand_split_test_set(dataset, args.test_set_imgs_per_class)
     if args.collapse_annotations in ["majority", "random"]:
         reserve_set = data.collapse_annotations(reserve_set, use_majority=args.collapse_annotations == "majority")
     train_set, reserve_set = data.rand_split_dataset(reserve_set, args.init_train_set_size)
-
-    encoder = torch.load(args.encoding_file)
 
     for round in range(args.num_rounds):
         # initialize model and optimizer
